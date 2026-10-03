@@ -1,0 +1,13 @@
+node_modules
+dist
+dist-ssr
+.env
+.env.local
+*.local
+*.tsbuildinfo
+.DS_Store
+supabase/.branches
+supabase/.temp
+.supabase
+.deno
+.freebuff
