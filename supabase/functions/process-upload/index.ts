@@ -11,9 +11,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sha256Hex } from "../_shared/hash.ts";
 import {
-  CONTENT_FLAG_THRESHOLD,
-  METADATA_FLAG_THRESHOLD,
-  compositeScore,
+  classifyPair,
   extensionOf,
   extractFile,
   filenameSimilarity,
@@ -138,7 +136,45 @@ Deno.serve(async (req) => {
       })
       .select("id")
       .single();
-    if (blobError) return json({ error: blobError.message }, 500);
+
+    // Tier-1 race fix: the UNIQUE constraint on (user_id, sha256_hash) can be
+    // hit by a concurrent upload of the same bytes. The loser must not see a
+    // raw 500 — it links to the winner's blob and reuses the already-stored
+    // bytes instead. Postgres raises code 23505 for unique-violation.
+    if (blobError) {
+      const match = /unique constraint" (.*)" violated/.exec(blobError.message);
+      if (match && match[1] === "physical_blobs_user_hash_key") {
+        const { data: existingBlob } = await supabase
+          .from("physical_blobs")
+          .select("id")
+          .eq("sha256_hash", sha)
+          .maybeSingle();
+        if (existingBlob) {
+          await supabase.rpc("increment_blob_ref", { p_blob_id: existingBlob.id });
+          const { data: lf, error: lfErr } = await supabase
+            .from("logical_files")
+            .insert({
+              user_id: user.id,
+              blob_id: existingBlob.id,
+              filename,
+              filename_stem: stem,
+              extension,
+              size_bytes: sizeBytes,
+            })
+            .select("id")
+            .single();
+          if (lfErr) return json({ error: lfErr.message }, 500);
+          return json({
+            tier: 1,
+            deduplicated: true,
+            logical_file_id: lf.id,
+            sha256: sha,
+            message: "Identical bytes already stored; reused existing blob.",
+          });
+        }
+      }
+      return json({ error: blobError.message }, 500);
+    }
 
     const { data: logical, error: logicalError } = await supabase
       .from("logical_files")
@@ -291,15 +327,12 @@ Deno.serve(async (req) => {
           provisional = r.provisional;
         }
 
-        const composite = compositeScore(contentScore, filenameScore);
-        const flagged = contentScore !== null
-          ? composite >= CONTENT_FLAG_THRESHOLD
-          : filenameScore >= METADATA_FLAG_THRESHOLD;
+        const { flagged, confidence, composite } = classifyPair(
+          contentScore,
+          provisional,
+          filenameScore,
+        );
         if (!flagged) continue;
-
-        const confidence = contentScore === null
-          ? "metadata-only"
-          : provisional ? "provisional" : "high";
 
         const [a, b] = fileId < cand.id ? [fileId, cand.id] : [cand.id, fileId];
         rows.push({
