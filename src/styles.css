@@ -119,6 +119,10 @@ th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--bor
 th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
 .filename-cell { font-weight: 500; word-break: break-all; }
 .flags-cell { display: flex; gap: 6px; flex-wrap: wrap; }
+.actions-cell { white-space: nowrap; }
+.row-actions, .row-confirm { display: inline-flex; gap: 8px; align-items: center; }
+button.danger-link { color: var(--danger); }
+.rename-input { min-width: 160px; width: auto; margin-top: 0; }
 .score { font-variant-numeric: tabular-nums; font-weight: 600; }
 
 .badge {
