@@ -161,6 +161,7 @@ export default function App() {
                 setFilterFileId(id);
                 setTab("duplicates");
               }}
+              onChanged={() => void reload()}
             />
           </>
         )}
