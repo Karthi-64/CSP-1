@@ -25,12 +25,3 @@ export function renderWordDiff(a: string, b: string): ReactNode[] {
     return <span key={i}>{part.value}</span>;
   });
 }
-
-/** Slice ~chars characters of context around an offset in extracted text. */
-export function excerpt(text: string, offset: number, radius = 100): string {
-  const start = Math.max(0, offset - radius);
-  const end = Math.min(text.length, offset + radius);
-  const prefix = start > 0 ? "…" : "";
-  const suffix = end < text.length ? "…" : "";
-  return prefix + text.slice(start, end).replace(/\s+/g, " ").trim() + suffix;
-}

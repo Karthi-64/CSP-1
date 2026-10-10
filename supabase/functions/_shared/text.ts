@@ -1,9 +1,16 @@
-// Text extraction (format-specific), confidence floors, shingling and all
-// scoring math. Everything here is deterministic arithmetic — no AI.
-
+// Text extraction (format-specific) for the upload pipeline. All the pure
+// arithmetic — shingling, scoring, confidence floors — lives in ./score.ts.
+// Everything here is deterministic; no AI service is called.
 import JSZip from "npm:jszip@3.10.1";
 import { extractText, getDocumentProxy } from "npm:unpdf@0.12.1";
-import { shingleHash64 as hashOf } from "./hash.ts";
+import {
+  extensionOf,
+  formatOf,
+  expectedCharsFor,
+  passesConfidence,
+} from "./score.ts";
+
+export * from "./score.ts";
 
 export type Extracted = {
   text: string;
@@ -12,12 +19,6 @@ export type Extracted = {
   expectedMinChars: number;
   pageCount: number | null;
 };
-
-// --- per-format floors -------------------------------------------------------
-export const CHARS_PER_PAGE = 1500; // prose (.docx / .pdf)
-export const CHARS_PER_SLIDE = 150; // .pptx
-export const CHARS_PER_CELL = 4; // .xlsx (non-empty cells)
-export const CONFIDENCE_RATIO = 0.2; // actual must reach 20% of expected
 
 function decodeXmlEntities(s: string): string {
   return s
@@ -114,17 +115,6 @@ function extractPlain(bytes: Uint8Array): string {
   return cleanText(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
 }
 
-export function extensionOf(filename: string): string {
-  const i = filename.lastIndexOf(".");
-  return i >= 0 ? filename.slice(i + 1).toLowerCase() : "";
-}
-
-export function stemOf(filename: string): string {
-  const base = filename.split(/[\\/]/).pop() ?? filename;
-  const i = base.lastIndexOf(".");
-  return i > 0 ? base.slice(0, i) : base;
-}
-
 /**
  * Extract text + page count for a file, applying the spec's confidence floor.
  * Returns extraction_ok=false (and a reason) when the text layer is too thin,
@@ -135,6 +125,7 @@ export async function extractFile(
   bytes: Uint8Array,
 ): Promise<Extracted> {
   const ext = extensionOf(filename);
+  const format = formatOf(ext);
   const fail = (reason: string, expected = 0): Extracted => ({
     text: "",
     ok: false,
@@ -144,7 +135,7 @@ export async function extractFile(
   });
 
   try {
-    if (ext === "txt" || ext === "md" || ext === "csv") {
+    if (format === "plain") {
       const text = extractPlain(bytes);
       return {
         text,
@@ -155,12 +146,12 @@ export async function extractFile(
       };
     }
 
-    if (ext === "docx") {
+    if (format === "docx") {
       const text = await extractDocx(bytes);
       // .docx exposes no reliable page count without a layout engine; treat
       // the document as at least one page.
-      const expected = CHARS_PER_PAGE;
-      const ok = text.length >= expected * CONFIDENCE_RATIO;
+      const expected = expectedCharsFor("docx");
+      const ok = passesConfidence(text.length, expected);
       return {
         text,
         ok,
@@ -170,10 +161,10 @@ export async function extractFile(
       };
     }
 
-    if (ext === "pptx") {
+    if (format === "pptx") {
       const { text, slides } = await extractPptx(bytes);
-      const expected = Math.max(slides, 1) * CHARS_PER_SLIDE;
-      const ok = text.length >= expected * CONFIDENCE_RATIO;
+      const expected = expectedCharsFor("pptx", { slideCount: slides });
+      const ok = passesConfidence(text.length, expected);
       return {
         text,
         ok,
@@ -183,10 +174,10 @@ export async function extractFile(
       };
     }
 
-    if (ext === "xlsx") {
+    if (format === "xlsx") {
       const { text, nonEmptyCells } = await extractXlsx(bytes);
-      const expected = Math.max(nonEmptyCells, 1) * CHARS_PER_CELL;
-      const ok = text.length >= expected * CONFIDENCE_RATIO;
+      const expected = expectedCharsFor("xlsx", { nonEmptyCells });
+      const ok = passesConfidence(text.length, expected);
       return {
         text,
         ok,
@@ -196,10 +187,10 @@ export async function extractFile(
       };
     }
 
-    if (ext === "pdf") {
+    if (format === "pdf") {
       const { text, pages } = await extractPdf(bytes);
-      const expected = Math.max(pages, 1) * CHARS_PER_PAGE;
-      const ok = text.length >= expected * CONFIDENCE_RATIO;
+      const expected = expectedCharsFor("pdf", { pageCount: pages });
+      const ok = passesConfidence(text.length, expected);
       return {
         text,
         ok,
@@ -213,108 +204,4 @@ export async function extractFile(
   } catch (err) {
     return fail(`extraction error: ${(err as Error).message}`);
   }
-}
-
-// --- shingling ---------------------------------------------------------------
-
-export type Shingle = { hash: string; startOffset: number };
-
-/**
- * Overlapping 5-word shingles. start_offset is the character index where the
- * window begins, so the UI can slice ~100 chars of matched-sentence evidence.
- */
-export function shingle(text: string, window = 5): Shingle[] {
-  if (!text) return [];
-  const words: { word: string; start: number }[] = [];
-  const re = /\S+/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    words.push({ word: m[0], start: m.index });
-  }
-  const out: Shingle[] = [];
-  if (words.length < window) return out;
-  for (let i = 0; i + window <= words.length; i++) {
-    const slice = words.slice(i, i + window).map((w) => w.word).join(" ");
-    out.push({ hash: hashOf(slice), startOffset: words[i].start });
-  }
-  return out;
-}
-
-// --- scoring -----------------------------------------------------------------
-
-/** Normalised Levenshtein distance in [0,1]; 1 - distance = similarity. */
-export function filenameSimilarity(a: string, b: string): number {
-  const x = a.toLowerCase();
-  const y = b.toLowerCase();
-  if (x === y) return 1;
-  const maxLen = Math.max(x.length, y.length);
-  if (maxLen === 0) return 1;
-  return 1 - levenshtein(x, y) / maxLen;
-}
-
-export function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  let prev = new Array<number>(n + 1);
-  let curr = new Array<number>(n + 1);
-  for (let j = 0; j <= n; j++) prev[j] = j;
-  for (let i = 1; i <= m; i++) {
-    curr[0] = i;
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
-    }
-    [prev, curr] = [curr, prev];
-  }
-  return prev[n];
-}
-
-export type ContentScore = { score: number; provisional: boolean } | null;
-
-/**
- * Down-weighted Jaccard over shingle sets.
- *   weight(s) = ln(N / df(s))
- * When N < 10 we fall back to plain (unweighted) Jaccard and mark provisional.
- */
-export function weightedJaccard(
-  aHashes: string[],
-  bHashes: string[],
-  docFrequency: Map<string, number>,
-  N: number,
-): { score: number; provisional: boolean } {
-  const setA = new Set(aHashes);
-  const setB = new Set(bHashes);
-  const union = new Set([...setA, ...setB]);
-  const inter = [...setA].filter((h) => setB.has(h));
-
-  if (N < 10) {
-    const score = union.size === 0 ? 0 : inter.length / union.size;
-    return { score, provisional: true };
-  }
-
-  const weight = (h: string) => {
-    const df = Math.max(docFrequency.get(h) ?? 1, 1);
-    return Math.log(N / df);
-  };
-
-  let unionWeight = 0;
-  for (const h of union) unionWeight += weight(h);
-  let interWeight = 0;
-  for (const h of inter) interWeight += weight(h);
-
-  return { score: unionWeight === 0 ? 0 : interWeight / unionWeight, provisional: false };
-}
-
-export function compositeScore(contentScore: number | null, filenameScore: number): number {
-  return contentScore === null ? filenameScore : 0.7 * contentScore + 0.3 * filenameScore;
-}
-
-// Thresholds from the spec.
-export const CONTENT_FLAG_THRESHOLD = 0.55;
-export const METADATA_FLAG_THRESHOLD = 0.8;
-
-export function sizeBucket(sizeBytes: number): number {
-  return Math.floor(Math.log(Math.max(sizeBytes, 1)) / Math.log(1.2));
 }

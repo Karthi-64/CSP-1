@@ -117,6 +117,30 @@ Deleting a logical file calls the transactional `delete_logical_file` RPC: a
 trigger decrements the blob's `ref_count`, and the `delete-file` function removes
 the stored object only when the count reaches 0.
 
+## Testing
+
+The similarity math and the database guarantees are both covered by executable
+checks — no Supabase project required.
+
+```bash
+npm test        # scoring, shingling, hashing, confidence floors, formatting
+npm run test:sql # applies the migration to a scratch Postgres and asserts RLS/dedup
+```
+
+`npm test` (Node's built-in runner) drives the **real** pipeline functions in
+[`supabase/functions/_shared/score.ts`](supabase/functions/_shared/score.ts):
+SHA-256 vectors, 64-bit shingle hashing staying inside signed-bigint range,
+overlapping-window offsets, Levenshtein, the down-weighted Jaccard (including
+that a ubiquitous shingle scores zero), the `N < 10` provisional fallback, the
+composite formula, and every flag/confidence boundary.
+
+`npm run test:sql` creates a scratch database, installs minimal Supabase stubs
+(`auth.uid()`, `storage.foldername`, the `authenticated` role), applies the real
+migration, then asserts — as two different users — that the same SHA-256 may
+exist for two users but not twice within one, that RLS blocks cross-user reads,
+inserts and deletes, that `ref_count` decrements and the blob (and only the
+blob) is freed at zero, and that document frequency is additive and per-user.
+
 ## Explicit non-goals (this build)
 
 No automatic document merging. No AI/LLM calls. No embeddings/semantic

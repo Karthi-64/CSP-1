@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
-import { excerpt, renderWordDiff } from "../lib/diff";
-import { formatBytes, formatDate, formatPercent } from "../lib/format";
+import { renderWordDiff } from "../lib/diff";
+import { excerpt, formatBytes, formatDate, formatPercent } from "../lib/format";
 import {
   CONFIDENCE_LABEL,
   type FileText,
