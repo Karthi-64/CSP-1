@@ -1,5 +1,5 @@
 -- ============================================================================
--- Cloud Files — two-tier deduplication schema
+-- Safara — two-tier deduplication schema
 -- All comparison logic is plain hashing / set similarity / weighted scoring.
 -- No AI, no embeddings, no cross-user anything.
 -- ============================================================================

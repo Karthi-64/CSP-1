@@ -122,7 +122,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">Cloud Files</div>
+        <div className="brand">Safara</div>
         <nav className="tabs">
           <button className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
             Files

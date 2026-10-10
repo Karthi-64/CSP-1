@@ -5,7 +5,7 @@
 #   ./tests/sql/run.sh [db_name]
 set -euo pipefail
 
-DB="${1:-cloudfiles_rls_test}"
+DB="${1:-safara_rls_test}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 dropdb --if-exists "$DB"

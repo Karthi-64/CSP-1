@@ -1,4 +1,4 @@
-# Cloud Files — personal file manager with two-tier deduplication
+# Safara — personal file manager with two-tier deduplication
 
 A personal cloud file manager on Supabase. Deduplication happens in two tiers:
 

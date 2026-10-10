@@ -33,7 +33,7 @@ export function Auth() {
   return (
     <div className="auth-wrap">
       <form className="card auth-card" onSubmit={submit}>
-        <h1>Cloud Files</h1>
+        <h1>Safara</h1>
         <p className="muted">
           Personal file manager with two-tier deduplication. All comparisons are
           local hashing and scoring — no AI anywhere.

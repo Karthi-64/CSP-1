@@ -1,5 +1,5 @@
 -- ============================================================================
--- Cloud Files — fix doc-frequency decrement on file deletion
+-- Safara — fix doc-frequency decrement on file deletion
 -- ============================================================================
 
 create or replace function public.decrement_shingle_doc_frequency()
